@@ -132,7 +132,7 @@
     justify-content: space-between;
     gap: 12px;
     flex: 0 0 auto;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
   }
   .topbar .title-block{ flex: 0 0 auto; min-width: 0; }
 
@@ -183,19 +183,19 @@
 
   .day-nav{
     display:flex;
-    gap: 8px;
+    gap: 5px;
     flex: 1 1 auto;
     justify-content: flex-end;
   }
   .day-chip{
     flex: 0 0 auto;
     text-align: center;
-    padding: 5px 10px;
-    border-radius: 6px;
+    padding: 3px 7px;
+    border-radius: 5px;
     border: 2px solid var(--rule);
     background: var(--paper);
     color: var(--ink);
-    font-size: 0.8rem;
+    font-size: 0.65rem;
     font-weight: 700;
     cursor: pointer;
     font-family: inherit;
@@ -219,7 +219,7 @@
     flex-direction: column;
     justify-content: center;
     position: relative;
-    margin-bottom: 14px;
+    margin-bottom: 8px;
     overflow: hidden;
   }
   .reader-book{
@@ -232,10 +232,10 @@
     opacity: 0.85;
   }
   .reader-text{
-    font-size: clamp(2rem, 5.5vw, 4.2rem);
-    line-height: 1.45;
+    font-size: clamp(1.6rem, 4.5vw, 3.4rem);
+    line-height: 1.4;
     font-family: 'Source Serif 4', Georgia, serif;
-    overflow-y: auto;
+    flex: 0 0 auto;
   }
 
   .reader-controls{
@@ -247,13 +247,13 @@
   }
   .nav-btn{
     flex: 0 0 auto;
-    display:flex; align-items:center; gap: 10px;
-    padding: 8px 18px;
-    border-radius: 7px;
+    display:flex; align-items:center; gap: 7px;
+    padding: 5px 12px;
+    border-radius: 6px;
     border: 2px solid var(--indigo);
     background: var(--paper);
     color: var(--indigo);
-    font-size: 0.85rem;
+    font-size: 0.72rem;
     font-weight: 700;
     cursor: pointer;
     font-family: inherit;
@@ -1259,6 +1259,8 @@ let currentWeek = null;
 let currentDays = null;
 let currentDayIndex = 0;
 let currentVerseIndex = 0;
+let currentPart = 0;       // which page of a long verse (-1 = last page)
+let currentPartCount = 1;
 let readerCounts = {};   // { dayIndex: N } — per-day reader count
 
 const STORAGE_KEY_PREFIX = 'cfm-progress-';
@@ -1362,6 +1364,7 @@ function openWeek(weekId){
   currentDays = computeDays(entry.passages);
   currentDayIndex = 0;
   currentVerseIndex = 0;
+  currentPart = 0;
   readerCounts = {};
   document.getElementById('weekEyebrow').textContent = 'Come, Follow Me \u00b7 ' + entry.week.dateRange;
   document.getElementById('weekTitle').textContent = entry.week.title;
@@ -1378,9 +1381,50 @@ function buildDayNav(){
     const chip = document.createElement('button');
     chip.className = 'day-chip' + (idx === currentDayIndex ? ' active' : '') + (progress[idx] ? ' done' : '');
     chip.textContent = d.name;
-    chip.addEventListener('click', () => { currentDayIndex = idx; currentVerseIndex = 0; renderReader(); });
+    chip.addEventListener('click', () => { currentDayIndex = idx; currentVerseIndex = 0; currentPart = 0; renderReader(); });
     nav.appendChild(chip);
   });
+}
+
+// Fit a verse into the card without scrolling (Silk can't scroll flex children).
+// Shrinks font only down to a readable floor; if still too long, splits the verse into pages.
+function layoutVerse(text){
+  const card = document.querySelector('#readerView .reader-card');
+  const rt   = document.getElementById('readerText');
+  const book = document.getElementById('readerBook');
+  const cs   = getComputedStyle(card);
+  const avail = card.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
+              - book.offsetHeight - parseFloat(getComputedStyle(book).marginBottom) - 4;
+  const fits = () => rt.scrollHeight <= avail;
+
+  rt.style.fontSize = '';
+  const base = parseFloat(getComputedStyle(rt).fontSize);
+  // Floor: never smaller than ~75% of the normal size (and never below 28px)
+  const floor = Math.min(base, Math.max(28, Math.round(base * 0.75)));
+
+  rt.textContent = text;
+  let size = base;
+  while(!fits() && size > floor){
+    size = Math.max(floor, size - 2);
+    rt.style.fontSize = size + 'px';
+  }
+  if(fits()) return { size, pages: [text] };
+
+  // Still too long at the floor size: split on word boundaries into pages.
+  const words = text.split(' ');
+  const pages = [];
+  let s = 0;
+  while(s < words.length){
+    let lo = s + 1, hi = words.length, best = s + 1;
+    while(lo <= hi){
+      const mid = (lo + hi) >> 1;
+      rt.textContent = words.slice(s, mid).join(' ') + (mid < words.length ? ' \u2026' : '');
+      if(fits()){ best = mid; lo = mid + 1; } else { hi = mid - 1; }
+    }
+    pages.push(words.slice(s, best).join(' ') + (best < words.length ? ' \u2026' : ''));
+    s = best;
+  }
+  return { size, pages };
 }
 
 function renderReader(){
@@ -1393,12 +1437,21 @@ function renderReader(){
   const statusParts = [v.book + ':' + v.num];
   if(numReaders > 1) statusParts.push('Reader ' + reader);
   document.getElementById('readerBook').textContent = statusParts.join('  \u00b7  ');
-  document.getElementById('readerText').textContent = v.text;
+  const readerText = document.getElementById('readerText');
+  const layout = layoutVerse(v.text);
+  currentPartCount = layout.pages.length;
+  if(currentPart < 0 || currentPart >= currentPartCount) currentPart = currentPart < 0 ? currentPartCount - 1 : 0;
+  readerText.style.fontSize = layout.size + 'px';
+  readerText.textContent = layout.pages[currentPart];
+  if(currentPartCount > 1){
+    statusParts.push('Part ' + (currentPart + 1) + ' of ' + currentPartCount);
+    document.getElementById('readerBook').textContent = statusParts.join('  \u00b7  ');
+  }
 
   document.getElementById('dayRange').textContent = d.name + ': ' + dayRangeLabel(d);
 
-  const isFirst = currentVerseIndex === 0 && currentDayIndex === 0;
-  const isLast  = currentVerseIndex === d.verses.length - 1 && currentDayIndex === currentDays.length - 1;
+  const isFirst = currentVerseIndex === 0 && currentDayIndex === 0 && currentPart === 0;
+  const isLast  = currentVerseIndex === d.verses.length - 1 && currentDayIndex === currentDays.length - 1 && currentPart === currentPartCount - 1;
   document.getElementById('prevBtn').disabled = isFirst;
   document.getElementById('nextBtn').disabled = isLast;
 
@@ -1419,7 +1472,7 @@ function renderReader(){
     } else {
       btn.textContent = vv.num;
     }
-    btn.addEventListener('click', () => { currentVerseIndex = idx; renderReader(); document.getElementById('jumpPanel').classList.remove('open'); });
+    btn.addEventListener('click', () => { currentVerseIndex = idx; currentPart = 0; renderReader(); document.getElementById('jumpPanel').classList.remove('open'); });
     grid.appendChild(btn);
   });
 
@@ -1432,14 +1485,20 @@ function renderReader(){
   buildDayNav();
 }
 
+let _rz;
+window.addEventListener('resize', () => { clearTimeout(_rz); _rz = setTimeout(() => { if(document.getElementById('readerView').classList.contains('active')){ currentPart = 0; renderReader(); } }, 150); });
+
 function goNext(){
   const d = currentDays[currentDayIndex];
+  if(currentPart < currentPartCount - 1){ currentPart++; renderReader(); return; }
+  currentPart = 0;
   if(currentVerseIndex < d.verses.length - 1){ currentVerseIndex++; renderReader(); }
   else if(currentDayIndex < currentDays.length - 1){ currentDayIndex++; currentVerseIndex = 0; renderReader(); }
 }
 function goPrev(){
-  if(currentVerseIndex > 0){ currentVerseIndex--; renderReader(); }
-  else if(currentDayIndex > 0){ currentDayIndex--; currentVerseIndex = currentDays[currentDayIndex].verses.length - 1; renderReader(); }
+  if(currentPart > 0){ currentPart--; renderReader(); return; }
+  if(currentVerseIndex > 0){ currentVerseIndex--; currentPart = -1; renderReader(); }
+  else if(currentDayIndex > 0){ currentDayIndex--; currentVerseIndex = currentDays[currentDayIndex].verses.length - 1; currentPart = -1; renderReader(); }
 }
 
 document.getElementById('prevBtn').addEventListener('click', goPrev);
