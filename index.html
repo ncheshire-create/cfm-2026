@@ -107,6 +107,15 @@
     text-align: center;
   }
 
+  .week-card.past{ opacity: 0.6; }
+  .past-toggle-row{ text-align: center; margin-top: 24px; }
+  .past-toggle{
+    background: var(--paper); border: 2px solid var(--rule); border-radius: 8px;
+    color: var(--ink-soft); font-family: inherit; font-size: 0.95rem; font-weight: 700;
+    padding: 10px 20px; cursor: pointer;
+  }
+  .past-toggle:hover, .past-toggle:focus{ outline: none; border-color: var(--walnut); color: var(--walnut); box-shadow: 0 0 0 3px var(--focus); }
+
   .picker-footer{
     margin-top: 44px;
     padding-top: 20px;
@@ -393,6 +402,7 @@
       <div class="picker-sub">Verse-by-verse KJV reading, split across Monday–Friday and Sunday.</div>
     </div>
     <div class="week-grid" id="weekGrid"></div>
+    <div class="past-toggle-row" id="pastToggleRow" style="display:none"><button class="past-toggle" id="pastToggle"></button></div>
     <div class="picker-footer">
       Scripture text is the King James Version, public domain in the United States.
     </div>
@@ -1380,12 +1390,34 @@ function readerForVerse(verseIdx, numReaders){
 }
 
 // ===================== Picker view =====================
+// A week is "past" once its last day (the Sunday) is over.
+const MONTHS = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+function weekEndDate(dateRange){
+  // e.g. "Sep 7–13", "Sep 28–Oct 4"
+  const parts = dateRange.split('–');
+  const start = parts[0].trim().split(' ');
+  const end = parts[parts.length - 1].trim().split(' ');
+  const month = end.length > 1 ? MONTHS[end[0]] : MONTHS[start[0]];
+  const day = parseInt(end[end.length - 1], 10);
+  return new Date(2026, month, day);
+}
+function todayDate(){
+  const q = /[?&]today=(\d{4})-(\d{2})-(\d{2})/.exec(location.search);  // for testing
+  if(q) return new Date(+q[1], +q[2] - 1, +q[3]);
+  const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate());
+}
+let showPastWeeks = false;
+
 function buildPicker(){
   const grid = document.getElementById('weekGrid');
   grid.innerHTML = '';
-  ALL_WEEKS.forEach(w => {
+  const today = todayDate();
+  const isPast = w => weekEndDate(w.week.dateRange) < today;
+  const past = ALL_WEEKS.filter(isPast);
+  const shown = showPastWeeks ? ALL_WEEKS : ALL_WEEKS.filter(w => !isPast(w));
+  shown.forEach(w => {
     const btn = document.createElement('button');
-    btn.className = 'week-card';
+    btn.className = 'week-card' + (isPast(w) ? ' past' : '');
     btn.innerHTML =
       '<div class="dates">' + w.week.dateRange + '</div>' +
       '<div class="week-title display">' + w.week.title + '</div>' +
@@ -1393,11 +1425,22 @@ function buildPicker(){
     btn.addEventListener('click', () => openWeek(w.id));
     grid.appendChild(btn);
   });
-  const soon = document.createElement('div');
-  soon.className = 'coming-soon';
-  soon.style.display = 'none';
-  grid.appendChild(soon);
+  const toggleRow = document.getElementById('pastToggleRow');
+  const toggle = document.getElementById('pastToggle');
+  if(past.length){
+    toggleRow.style.display = '';
+    toggle.textContent = showPastWeeks
+      ? 'Hide past weeks'
+      : 'Show past weeks (' + past.length + ')';
+  } else {
+    toggleRow.style.display = 'none';
+  }
 }
+
+document.getElementById('pastToggle').addEventListener('click', () => {
+  showPastWeeks = !showPastWeeks; buildPicker();
+  const t = document.getElementById('pastToggle'); if(t) t.focus();
+});
 
 function showPicker(){
   document.getElementById('pickerView').classList.add('active');
