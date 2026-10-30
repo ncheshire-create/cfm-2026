@@ -1385,8 +1385,21 @@ function dayRangeLabel(d){
 function getReaderCount(dayIdx){ return readerCounts[dayIdx] || 1; }
 
 // Which reader reads verse at position verseIdx within the day?
-function readerForVerse(verseIdx, numReaders){
-  return Math.floor(verseIdx / BLOCK_SIZE) % numReaders + 1;
+// Readers take turns in blocks of about BLOCK_SIZE verses. Everyone gets the same
+// number of turns, and verses are spread so reader totals differ by at most one.
+function readerForVerse(verseIdx, numReaders, totalVerses){
+  if(numReaders <= 1) return 1;
+  const rounds = Math.max(1, Math.ceil(totalVerses / (BLOCK_SIZE * numReaders)));
+  const blocks = rounds * numReaders;
+  const base = Math.floor(totalVerses / blocks), extra = totalVerses % blocks;
+  // first `extra` blocks get one extra verse; extras cycle through readers evenly
+  let start = 0;
+  for(let b = 0; b < blocks; b++){
+    const size = base + (b < extra ? 1 : 0);
+    if(verseIdx < start + size) return (b % numReaders) + 1;
+    start += size;
+  }
+  return numReaders;
 }
 
 // ===================== Picker view =====================
@@ -1535,7 +1548,7 @@ function renderReader(){
   const d = currentDays[currentDayIndex];
   const v = d.verses[currentVerseIndex];
   const numReaders = getReaderCount(currentDayIndex);
-  const reader = readerForVerse(currentVerseIndex, numReaders);
+  const reader = readerForVerse(currentVerseIndex, numReaders, d.verses.length);
 
   // Single status line: "Esther 1:8  ·  Reader 2" (reader omitted if only 1)
   const statusParts = [v.book + ':' + v.num];
@@ -1571,7 +1584,7 @@ function renderReader(){
     const btn = document.createElement('button');
     btn.className = 'jump-btn' + (idx === currentVerseIndex ? ' current' : '');
     if(numReaders > 1){
-      const r = readerForVerse(idx, numReaders);
+      const r = readerForVerse(idx, numReaders, d.verses.length);
       btn.innerHTML = vv.num + '<div style="font-size:0.6rem;color:var(--ink-soft);font-weight:600">R' + r + '</div>';
     } else {
       btn.textContent = vv.num;
